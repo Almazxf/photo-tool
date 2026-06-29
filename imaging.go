@@ -82,9 +82,11 @@ func cropToAspect(src image.Image, targetW, targetH int) image.Image {
 
 	var cropW, cropH int
 	if srcRatio > targetRatio {
+		// исходник шире нужного - обрезаем по бокам
 		cropH = srcH
 		cropW = int(float64(srcH) * targetRatio)
 	} else {
+		// исходник выше нужного - обрезаем сверху/снизу
 		cropW = srcW
 		cropH = int(float64(srcW) / targetRatio)
 	}
@@ -101,8 +103,9 @@ func cropToAspect(src image.Image, targetW, targetH int) image.Image {
 	return cropped
 }
 
-// letterboxFit вписывает изображение в целевой размер с сохранением пропорций, добавляя чёрные поля.
-func letterboxFit(src image.Image, targetW, targetH int) *image.RGBA {
+// resizeFit уменьшает изображение с сохранением пропорций, чтобы вписать в targetW x targetH,
+// но НЕ добавляет чёрные поля — возвращает картинку меньшего размера (без искажений и без полей).
+func resizeFit(src image.Image, targetW, targetH int) *image.RGBA {
 	bounds := src.Bounds()
 	srcW, srcH := bounds.Dx(), bounds.Dy()
 	srcRatio := float64(srcW) / float64(srcH)
@@ -117,7 +120,15 @@ func letterboxFit(src image.Image, targetW, targetH int) *image.RGBA {
 		fitW = int(float64(targetH) * srcRatio)
 	}
 
-	resized := resizeBilinear(src, fitW, fitH)
+	return resizeBilinear(src, fitW, fitH)
+}
+
+// padToCanvas помещает уже готовое (например, очищенное от надписей) изображение
+// на чёрный канвас нужного размера, по центру.
+func padToCanvas(fit image.Image, targetW, targetH int) *image.RGBA {
+	fitBounds := fit.Bounds()
+	fitW, fitH := fitBounds.Dx(), fitBounds.Dy()
+
 	canvas := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
 	for y := 0; y < targetH; y++ {
 		for x := 0; x < targetW; x++ {
@@ -128,27 +139,45 @@ func letterboxFit(src image.Image, targetW, targetH int) *image.RGBA {
 	offY := (targetH - fitH) / 2
 	for y := 0; y < fitH; y++ {
 		for x := 0; x < fitW; x++ {
-			canvas.Set(offX+x, offY+y, resized.At(x, y))
+			canvas.Set(offX+x, offY+y, fit.At(fitBounds.Min.X+x, fitBounds.Min.Y+y))
 		}
 	}
 	return canvas
 }
 
-// processImage применяет полный пайплайн: обрезка/letterbox/растяжение -> ресайз
-func processImage(src image.Image, targetW, targetH int, mode string) image.Image {
-	var result image.Image
+// letterboxFit вписывает изображение в целевой размер с сохранением пропорций, добавляя чёрные поля.
+func letterboxFit(src image.Image, targetW, targetH int) *image.RGBA {
+	fit := resizeFit(src, targetW, targetH)
+	return padToCanvas(fit, targetW, targetH)
+}
 
+// preWatermarkImage возвращает изображение ПЕРЕД добавлением чёрных полей (для crop/stretch это уже финальный размер,
+// для letterbox — уменьшенное фото без полей, чтобы поиск надписей видел настоящие углы фото).
+func preWatermarkImage(src image.Image, targetW, targetH int, mode string) image.Image {
 	switch mode {
 	case "crop":
 		cropped := cropToAspect(src, targetW, targetH)
-		result = resizeBilinear(cropped, targetW, targetH)
+		return resizeBilinear(cropped, targetW, targetH)
 	case "letterbox":
-		result = letterboxFit(src, targetW, targetH)
+		return resizeFit(src, targetW, targetH)
 	case "stretch":
-		result = resizeBilinear(src, targetW, targetH)
+		return resizeBilinear(src, targetW, targetH)
 	default:
-		result = resizeBilinear(src, targetW, targetH)
+		return resizeBilinear(src, targetW, targetH)
 	}
-
-	return result
 }
+
+// finalizeImage добавляет чёрные поля, если режим letterbox (для crop/stretch ничего не делает - картинка уже готова).
+func finalizeImage(pre image.Image, targetW, targetH int, mode string) image.Image {
+	if mode == "letterbox" {
+		return padToCanvas(pre, targetW, targetH)
+	}
+	return pre
+}
+
+// processImage применяет полный пайплайн: обрезка/letterbox/растяжение -> ресайз (без учёта надписей)
+func processImage(src image.Image, targetW, targetH int, mode string) image.Image {
+	pre := preWatermarkImage(src, targetW, targetH, mode)
+	return finalizeImage(pre, targetW, targetH, mode)
+}
+
