@@ -166,7 +166,7 @@ func doWatermarkPreview() {
 			return
 		}
 
-		resized := processImage(src, targetW, targetH, cropMode)
+		resized := preWatermarkImage(src, targetW, targetH, cropMode)
 
 		cornerFrac := wmSizeSlider.Value / 100.0
 		sensitivity := wmSensSlider.Value
@@ -238,14 +238,16 @@ func processFiles() {
 				return false
 			}
 
-			result := processImage(src, targetW, targetH, cropMode)
+			pre := preWatermarkImage(src, targetW, targetH, cropMode)
 
 			if wmCheck.Checked {
 				cornerFrac := wmSizeSlider.Value / 100.0
 				sensitivity := wmSensSlider.Value
-				cleaned, _ := removeWatermarks(result, cornerFrac, sensitivity, getWmMethod())
-				result = cleaned
+				cleaned, _ := removeWatermarks(pre, cornerFrac, sensitivity, getWmMethod())
+				pre = cleaned
 			}
+
+			result := finalizeImage(pre, targetW, targetH, cropMode)
 
 			ext := ".jpg"
 			if !useJPG {
