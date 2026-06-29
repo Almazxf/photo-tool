@@ -82,11 +82,9 @@ func cropToAspect(src image.Image, targetW, targetH int) image.Image {
 
 	var cropW, cropH int
 	if srcRatio > targetRatio {
-		// исходник шире нужного - обрезаем по бокам
 		cropH = srcH
 		cropW = int(float64(srcH) * targetRatio)
 	} else {
-		// исходник выше нужного - обрезаем сверху/снизу
 		cropW = srcW
 		cropH = int(float64(srcW) / targetRatio)
 	}
@@ -121,7 +119,6 @@ func letterboxFit(src image.Image, targetW, targetH int) *image.RGBA {
 
 	resized := resizeBilinear(src, fitW, fitH)
 	canvas := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
-	// заливка чёрным
 	for y := 0; y < targetH; y++ {
 		for x := 0; x < targetW; x++ {
 			canvas.Set(x, y, color.RGBA{0, 0, 0, 255})
@@ -137,27 +134,8 @@ func letterboxFit(src image.Image, targetW, targetH int) *image.RGBA {
 	return canvas
 }
 
-// mirrorImage отражает изображение по горизонтали или вертикали.
-func mirrorImage(src image.Image, horizontal bool) *image.RGBA {
-	bounds := src.Bounds()
-	w, h := bounds.Dx(), bounds.Dy()
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			var sx, sy int
-			if horizontal {
-				sx, sy = w-1-x, y
-			} else {
-				sx, sy = x, h-1-y
-			}
-			dst.Set(x, y, src.At(bounds.Min.X+sx, bounds.Min.Y+sy))
-		}
-	}
-	return dst
-}
-
-// processImage применяет полный пайплайн: обрезка/letterbox/растяжение -> ресайз -> отзеркаливание
-func processImage(src image.Image, targetW, targetH int, mode string, mirror string) image.Image {
+// processImage применяет полный пайплайн: обрезка/letterbox/растяжение -> ресайз
+func processImage(src image.Image, targetW, targetH int, mode string) image.Image {
 	var result image.Image
 
 	switch mode {
@@ -170,13 +148,6 @@ func processImage(src image.Image, targetW, targetH int, mode string, mirror str
 		result = resizeBilinear(src, targetW, targetH)
 	default:
 		result = resizeBilinear(src, targetW, targetH)
-	}
-
-	switch mirror {
-	case "horizontal":
-		result = mirrorImage(result, true)
-	case "vertical":
-		result = mirrorImage(result, false)
 	}
 
 	return result
