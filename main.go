@@ -13,6 +13,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
@@ -26,7 +27,6 @@ var (
 	customHEntry  *widget.Entry
 	cropModeSel   *widget.RadioGroup
 	formatSel     *widget.RadioGroup
-	mirrorSel     *widget.RadioGroup
 	qualitySlider *widget.Slider
 	qualityLabel  *widget.Label
 	renameCheck   *widget.Check
@@ -34,6 +34,15 @@ var (
 	progressBar   *widget.ProgressBar
 	statusLabel   *widget.Label
 	fileListLabel *widget.Label
+
+	wmCheck       *widget.Check
+	wmMethodSel   *widget.RadioGroup
+	wmSensSlider  *widget.Slider
+	wmSensLabel   *widget.Label
+	wmSizeSlider  *widget.Slider
+	wmSizeLabel   *widget.Label
+	wmPreviewImg  *canvas.Image
+	wmPreviewInfo *widget.Label
 
 	selectedFiles []string
 )
@@ -122,15 +131,65 @@ func getCropMode() string {
 	}
 }
 
-func getMirrorMode() string {
-	switch mirrorSel.Selected {
-	case "Горизонтально":
-		return "horizontal"
-	case "Вертикально":
-		return "vertical"
-	default:
-		return "none"
+func getWmMethod() string {
+	if wmMethodSel.Selected == "Размытие" {
+		return "blur"
 	}
+	return "mirror"
+}
+
+func doWatermarkPreview() {
+	if len(selectedFiles) == 0 {
+		dialog.ShowInformation("Нет файла", "Сначала выбери фото или папку с фото.", window)
+		return
+	}
+
+	targetW, targetH, err := getTargetSize()
+	if err != nil {
+		dialog.ShowError(err, window)
+		return
+	}
+	cropMode := getCropMode()
+
+	wmPreviewInfo.SetText("Обрабатываю превью...")
+
+	go func() {
+		f, err := os.Open(selectedFiles[0])
+		if err != nil {
+			wmPreviewInfo.SetText("Не удалось открыть файл для превью.")
+			return
+		}
+		defer f.Close()
+		src, _, err := image.Decode(f)
+		if err != nil {
+			wmPreviewInfo.SetText("Не удалось декодировать файл для превью.")
+			return
+		}
+
+		resized := processImage(src, targetW, targetH, cropMode)
+
+		cornerFrac := wmSizeSlider.Value / 100.0
+		sensitivity := wmSensSlider.Value
+
+		corners := detectCorners(resized, cornerFrac, sensitivity)
+		overlay := drawCornerOutlines(resized, corners)
+
+		var foundNames []string
+		for _, c := range corners {
+			if c.flag {
+				foundNames = append(foundNames, c.name)
+			}
+		}
+
+		wmPreviewImg.Image = overlay
+		wmPreviewImg.Refresh()
+
+		if len(foundNames) == 0 {
+			wmPreviewInfo.SetText("Надписей не найдено ни в одном углу (на этом фото). Если надпись есть — увеличь чувствительность.")
+		} else {
+			wmPreviewInfo.SetText(fmt.Sprintf("Найдено в углах: %s. Красная рамка — зона, которая будет обработана.", strings.Join(foundNames, ", ")))
+		}
+	}()
 }
 
 func processFiles() {
@@ -146,7 +205,6 @@ func processFiles() {
 	}
 
 	cropMode := getCropMode()
-	mirrorMode := getMirrorMode()
 	useJPG := formatSel.Selected == "JPG"
 	quality := int(qualitySlider.Value)
 
@@ -180,7 +238,14 @@ func processFiles() {
 				return false
 			}
 
-			result := processImage(src, targetW, targetH, cropMode, mirrorMode)
+			result := processImage(src, targetW, targetH, cropMode)
+
+			if wmCheck.Checked {
+				cornerFrac := wmSizeSlider.Value / 100.0
+				sensitivity := wmSensSlider.Value
+				cleaned, _ := removeWatermarks(result, cornerFrac, sensitivity, getWmMethod())
+				result = cleaned
+			}
 
 			ext := ".jpg"
 			if !useJPG {
@@ -266,13 +331,6 @@ func main() {
 	formatSel = widget.NewRadioGroup([]string{"JPG", "PNG"}, func(s string) {})
 	formatSel.SetSelected("JPG")
 
-	mirrorSel = widget.NewRadioGroup([]string{
-		"Без отзеркаливания",
-		"Горизонтально",
-		"Вертикально",
-	}, func(s string) {})
-	mirrorSel.SetSelected("Без отзеркаливания")
-
 	qualityLabel = widget.NewLabel("Качество JPG: 85")
 	qualitySlider = widget.NewSlider(10, 100)
 	qualitySlider.SetValue(85)
@@ -284,6 +342,51 @@ func main() {
 	prefixEntry = widget.NewEntry()
 	prefixEntry.SetPlaceHolder("Префикс имени (например: bg)")
 	prefixEntry.SetText("image")
+
+	wmCheck = widget.NewCheck("Удалять надписи в углах (автоопределение)", func(b bool) {})
+
+	wmMethodSel = widget.NewRadioGroup([]string{
+		"Размазывание соседних пикселей",
+		"Размытие",
+	}, func(s string) {})
+	wmMethodSel.SetSelected("Размазывание соседних пикселей")
+
+	wmSensLabel = widget.NewLabel("Чувствительность: 1.8 (меньше = чаще срабатывает)")
+	wmSensSlider = widget.NewSlider(1.1, 4.0)
+	wmSensSlider.Step = 0.1
+	wmSensSlider.SetValue(1.8)
+	wmSensSlider.OnChanged = func(v float64) {
+		wmSensLabel.SetText(fmt.Sprintf("Чувствительность: %.1f (меньше = чаще срабатывает)", v))
+	}
+
+	wmSizeLabel = widget.NewLabel("Размер зоны в углу: 15% от фото")
+	wmSizeSlider = widget.NewSlider(5, 35)
+	wmSizeSlider.SetValue(15)
+	wmSizeSlider.OnChanged = func(v float64) {
+		wmSizeLabel.SetText(fmt.Sprintf("Размер зоны в углу: %.0f%% от фото", v))
+	}
+
+	wmPreviewImg = canvas.NewImageFromImage(nil)
+	wmPreviewImg.FillMode = canvas.ImageFillContain
+	wmPreviewImg.SetMinSize(fyne.NewSize(400, 225))
+	wmPreviewInfo = widget.NewLabel("Нажми «Проверить на первом фото», чтобы увидеть, что найдёт программа.")
+	wmPreviewInfo.Wrapping = fyne.TextWrapWord
+
+	wmPreviewBtn := widget.NewButton("Проверить на первом фото", func() {
+		doWatermarkPreview()
+	})
+
+	wmBox := container.NewVBox(
+		wmCheck,
+		wmMethodSel,
+		wmSensLabel,
+		wmSensSlider,
+		wmSizeLabel,
+		wmSizeSlider,
+		wmPreviewBtn,
+		wmPreviewImg,
+		wmPreviewInfo,
+	)
 
 	progressBar = widget.NewProgressBar()
 	statusLabel = widget.NewLabel("Готов к работе")
@@ -307,14 +410,14 @@ func main() {
 		widget.NewLabel("Формат вывода:"),
 		formatSel,
 		widget.NewSeparator(),
-		widget.NewLabel("Отзеркаливание:"),
-		mirrorSel,
-		widget.NewSeparator(),
 		qualityLabel,
 		qualitySlider,
 		widget.NewSeparator(),
 		renameCheck,
 		prefixEntry,
+		widget.NewSeparator(),
+		widget.NewLabel("Удаление надписей в углах:"),
+		wmBox,
 		widget.NewSeparator(),
 		startBtn,
 		progressBar,
