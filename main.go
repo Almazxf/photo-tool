@@ -35,14 +35,16 @@ var (
 	statusLabel   *widget.Label
 	fileListLabel *widget.Label
 
-	wmCheck       *widget.Check
-	wmMethodSel   *widget.RadioGroup
-	wmSensSlider  *widget.Slider
-	wmSensLabel   *widget.Label
-	wmSizeSlider  *widget.Slider
-	wmSizeLabel   *widget.Label
-	wmPreviewImg  *canvas.Image
-	wmPreviewInfo *widget.Label
+	wmCheck        *widget.Check
+	wmMethodSel    *widget.RadioGroup
+	wmHeightSlider *widget.Slider
+	wmHeightLabel  *widget.Label
+	wmLeftSlider   *widget.Slider
+	wmLeftLabel    *widget.Label
+	wmRightSlider  *widget.Slider
+	wmRightLabel   *widget.Label
+	wmPreviewImg   *canvas.Image
+	wmPreviewInfo  *widget.Label
 
 	selectedFiles []string
 )
@@ -92,6 +94,7 @@ func showFilePicker() {
 		selectedFiles = nil
 		collectImages(path, &selectedFiles)
 		updateFileListLabel()
+		doWatermarkPreview()
 	}, window)
 	fd.Show()
 }
@@ -140,18 +143,19 @@ func getWmMethod() string {
 
 func doWatermarkPreview() {
 	if len(selectedFiles) == 0 {
-		dialog.ShowInformation("Нет файла", "Сначала выбери фото или папку с фото.", window)
+		return
+	}
+	if wmPreviewInfo == nil {
 		return
 	}
 
 	targetW, targetH, err := getTargetSize()
 	if err != nil {
-		dialog.ShowError(err, window)
 		return
 	}
 	cropMode := getCropMode()
 
-	wmPreviewInfo.SetText("Обрабатываю превью...")
+	wmPreviewInfo.SetText("Обновляю превью...")
 
 	go func() {
 		f, err := os.Open(selectedFiles[0])
@@ -168,27 +172,12 @@ func doWatermarkPreview() {
 
 		resized := preWatermarkImage(src, targetW, targetH, cropMode)
 
-		cornerFrac := wmSizeSlider.Value / 100.0
-		sensitivity := wmSensSlider.Value
-
-		corners := detectCorners(resized, cornerFrac, sensitivity)
-		overlay := drawCornerOutlines(resized, corners)
-
-		var foundNames []string
-		for _, c := range corners {
-			if c.flag {
-				foundNames = append(foundNames, c.name)
-			}
-		}
+		zone := fixedZoneRect(resized.Bounds(), wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
+		overlay := drawZoneOutline(resized, zone)
 
 		wmPreviewImg.Image = overlay
 		wmPreviewImg.Refresh()
-
-		if len(foundNames) == 0 {
-			wmPreviewInfo.SetText("Надписей не найдено ни в одной полосе (верх/низ/слева/справа). Если надпись есть — увеличь чувствительность или размер зоны.")
-		} else {
-			wmPreviewInfo.SetText(fmt.Sprintf("Найдено: %s. Красная рамка — зона, которая будет обработана.", strings.Join(foundNames, ", ")))
-		}
+		wmPreviewInfo.SetText("Красная рамка — зона, которая будет очищена у всех фото в пачке. Подвинь слайдеры, чтобы рамка точно легла на надпись.")
 	}()
 }
 
@@ -241,10 +230,8 @@ func processFiles() {
 			pre := preWatermarkImage(src, targetW, targetH, cropMode)
 
 			if wmCheck.Checked {
-				cornerFrac := wmSizeSlider.Value / 100.0
-				sensitivity := wmSensSlider.Value
-				cleaned, _ := removeWatermarks(pre, cornerFrac, sensitivity, getWmMethod())
-				pre = cleaned
+				zone := fixedZoneRect(pre.Bounds(), wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
+				pre = removeFixedZone(pre, zone, getWmMethod())
 			}
 
 			result := finalizeImage(pre, targetW, targetH, cropMode)
@@ -345,7 +332,7 @@ func main() {
 	prefixEntry.SetPlaceHolder("Префикс имени (например: bg)")
 	prefixEntry.SetText("image")
 
-	wmCheck = widget.NewCheck("Удалять надписи (автоопределение по краям фото)", func(b bool) {})
+	wmCheck = widget.NewCheck("Удалять надпись (фиксированная зона снизу)", func(b bool) {})
 
 	wmMethodSel = widget.NewRadioGroup([]string{
 		"Размазывание соседних пикселей",
@@ -353,19 +340,28 @@ func main() {
 	}, func(s string) {})
 	wmMethodSel.SetSelected("Размазывание соседних пикселей")
 
-	wmSensLabel = widget.NewLabel("Чувствительность: 1.3 (меньше = чаще срабатывает)")
-	wmSensSlider = widget.NewSlider(1.0, 3.0)
-	wmSensSlider.Step = 0.1
-	wmSensSlider.SetValue(1.3)
-	wmSensSlider.OnChanged = func(v float64) {
-		wmSensLabel.SetText(fmt.Sprintf("Чувствительность: %.1f (меньше = чаще срабатывает)", v))
+	wmHeightLabel = widget.NewLabel("Высота зоны снизу: 10% от фото")
+	wmHeightSlider = widget.NewSlider(2, 40)
+	wmHeightSlider.SetValue(10)
+	wmHeightSlider.OnChanged = func(v float64) {
+		wmHeightLabel.SetText(fmt.Sprintf("Высота зоны снизу: %.0f%% от фото", v))
+		doWatermarkPreview()
 	}
 
-	wmSizeLabel = widget.NewLabel("Размер полосы (верх/низ/бока): 15% от фото")
-	wmSizeSlider = widget.NewSlider(5, 35)
-	wmSizeSlider.SetValue(15)
-	wmSizeSlider.OnChanged = func(v float64) {
-		wmSizeLabel.SetText(fmt.Sprintf("Размер полосы (верх/низ/бока): %.0f%% от фото", v))
+	wmLeftLabel = widget.NewLabel("Отступ слева: 0%")
+	wmLeftSlider = widget.NewSlider(0, 45)
+	wmLeftSlider.SetValue(0)
+	wmLeftSlider.OnChanged = func(v float64) {
+		wmLeftLabel.SetText(fmt.Sprintf("Отступ слева: %.0f%%", v))
+		doWatermarkPreview()
+	}
+
+	wmRightLabel = widget.NewLabel("Отступ справа: 0%")
+	wmRightSlider = widget.NewSlider(0, 45)
+	wmRightSlider.SetValue(0)
+	wmRightSlider.OnChanged = func(v float64) {
+		wmRightLabel.SetText(fmt.Sprintf("Отступ справа: %.0f%%", v))
+		doWatermarkPreview()
 	}
 
 	wmPreviewImg = canvas.NewImageFromImage(nil)
@@ -374,17 +370,19 @@ func main() {
 	wmPreviewInfo = widget.NewLabel("Нажми «Проверить на первом фото», чтобы увидеть, что найдёт программа.")
 	wmPreviewInfo.Wrapping = fyne.TextWrapWord
 
-	wmPreviewBtn := widget.NewButton("Проверить на первом фото", func() {
+	wmPreviewBtn := widget.NewButton("Обновить превью", func() {
 		doWatermarkPreview()
 	})
 
 	wmBox := container.NewVBox(
 		wmCheck,
 		wmMethodSel,
-		wmSensLabel,
-		wmSensSlider,
-		wmSizeLabel,
-		wmSizeSlider,
+		wmHeightLabel,
+		wmHeightSlider,
+		wmLeftLabel,
+		wmLeftSlider,
+		wmRightLabel,
+		wmRightSlider,
 		wmPreviewBtn,
 		wmPreviewImg,
 		wmPreviewInfo,
@@ -434,6 +432,7 @@ func main() {
 			collectImages(item.Path(), &selectedFiles)
 		}
 		updateFileListLabel()
+		doWatermarkPreview()
 	})
 
 	window.ShowAndRun()
