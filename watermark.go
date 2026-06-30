@@ -49,31 +49,31 @@ type cornerInfo struct {
 	flag bool
 }
 
-// detectCorners возвращает 4 угла с пометкой, похоже ли там на надпись
-func detectCorners(img image.Image, cornerFrac float64, sensitivity float64) []cornerInfo {
+// detectCorners возвращает 4 полосы (верх/низ/лево/право, на всю ширину/высоту) с пометкой,
+// похоже ли там на надпись. Полосы используются вместо квадратов в углах, потому что надписи
+// часто растянуты по всей ширине снизу/сверху, а не сидят строго в углу.
+func detectCorners(img image.Image, sizeFrac float64, sensitivity float64) []cornerInfo {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
-	cw := int(float64(w) * cornerFrac)
-	ch := int(float64(h) * cornerFrac)
-	if cw < 10 {
-		cw = 10
+	stripH := int(float64(h) * sizeFrac)
+	stripW := int(float64(w) * sizeFrac)
+	if stripH < 10 {
+		stripH = 10
 	}
-	if ch < 10 {
-		ch = 10
+	if stripW < 10 {
+		stripW = 10
 	}
 
 	corners := []cornerInfo{
-		{"top-left", image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Min.X+cw, bounds.Min.Y+ch), false},
-		{"top-right", image.Rect(bounds.Max.X-cw, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+ch), false},
-		{"bottom-left", image.Rect(bounds.Min.X, bounds.Max.Y-ch, bounds.Min.X+cw, bounds.Max.Y), false},
-		{"bottom-right", image.Rect(bounds.Max.X-cw, bounds.Max.Y-ch, bounds.Max.X, bounds.Max.Y), false},
+		{"верх", image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Max.X, bounds.Min.Y+stripH), false},
+		{"низ", image.Rect(bounds.Min.X, bounds.Max.Y-stripH, bounds.Max.X, bounds.Max.Y), false},
+		{"слева", image.Rect(bounds.Min.X, bounds.Min.Y, bounds.Min.X+stripW, bounds.Max.Y), false},
+		{"справа", image.Rect(bounds.Max.X-stripW, bounds.Min.Y, bounds.Max.X, bounds.Max.Y), false},
 	}
 
-	// средняя резкость по всему изображению (выборочно, для скорости)
 	globalAvg := edgeDensity(img, bounds)
-
 	threshold := globalAvg * sensitivity
-	minFloor := 8.0 // не реагировать на совсем плоские/тёмные фото
+	minFloor := 6.0
 
 	for i := range corners {
 		d := edgeDensity(img, corners[i].rect)
