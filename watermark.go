@@ -200,7 +200,57 @@ func blurRect(img *image.RGBA, rect image.Rectangle, radius int) {
 	}
 }
 
-// removeWatermarks применяет автоопределение + удаление к копии изображения, возвращает результат и список найденных углов
+// fixedZoneRect строит прямоугольник зоны вручную, по отступам в процентах от размеров фото.
+// bottomPct/heightPct задают полосу снизу: heightPct - высота зоны, leftPct/rightPct - отступы
+// по бокам (чтобы можно было не трогать всю ширину, если надпись не на всю ширину).
+func fixedZoneRect(bounds image.Rectangle, heightPct, leftPct, rightPct float64) image.Rectangle {
+	w, h := bounds.Dx(), bounds.Dy()
+	zoneH := int(float64(h) * heightPct / 100.0)
+	leftCut := int(float64(w) * leftPct / 100.0)
+	rightCut := int(float64(w) * rightPct / 100.0)
+
+	return image.Rect(
+		bounds.Min.X+leftCut, bounds.Max.Y-zoneH,
+		bounds.Max.X-rightCut, bounds.Max.Y,
+	)
+}
+
+// removeFixedZone применяет выбранный метод удаления к ОДНОЙ заданной вручную зоне (без автоопределения).
+func removeFixedZone(src image.Image, zone image.Rectangle, method string) *image.RGBA {
+	bounds := src.Bounds()
+	rgba := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			rgba.Set(x, y, src.At(x, y))
+		}
+	}
+	zone = zone.Intersect(bounds)
+	if zone.Empty() {
+		return rgba
+	}
+	if method == "blur" {
+		blurRect(rgba, zone, 6)
+	} else {
+		mirrorFillRect(rgba, zone, bounds, "низ")
+	}
+	return rgba
+}
+
+// drawZoneOutline рисует красную рамку вокруг заданной зоны для предпросмотра.
+func drawZoneOutline(src image.Image, zone image.Rectangle) *image.RGBA {
+	bounds := src.Bounds()
+	rgba := image.NewRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			rgba.Set(x, y, src.At(x, y))
+		}
+	}
+	zone = zone.Intersect(bounds)
+	if !zone.Empty() {
+		drawRectOutline(rgba, zone, color.RGBA{255, 40, 40, 255}, 4)
+	}
+	return rgba
+}
 func removeWatermarks(src image.Image, cornerFrac, sensitivity float64, method string) (*image.RGBA, []cornerInfo) {
 	bounds := src.Bounds()
 	rgba := image.NewRGBA(bounds)
