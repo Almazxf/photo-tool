@@ -185,9 +185,9 @@ func doWatermarkPreview() {
 		wmPreviewImg.Refresh()
 
 		if len(foundNames) == 0 {
-			wmPreviewInfo.SetText("Надписей не найдено ни в одном углу (на этом фото). Если надпись есть — увеличь чувствительность.")
+			wmPreviewInfo.SetText("Надписей не найдено ни в одной полосе (верх/низ/слева/справа). Если надпись есть — увеличь чувствительность или размер зоны.")
 		} else {
-			wmPreviewInfo.SetText(fmt.Sprintf("Найдено в углах: %s. Красная рамка — зона, которая будет обработана.", strings.Join(foundNames, ", ")))
+			wmPreviewInfo.SetText(fmt.Sprintf("Найдено: %s. Красная рамка — зона, которая будет обработана.", strings.Join(foundNames, ", ")))
 		}
 	}()
 }
@@ -345,7 +345,7 @@ func main() {
 	prefixEntry.SetPlaceHolder("Префикс имени (например: bg)")
 	prefixEntry.SetText("image")
 
-	wmCheck = widget.NewCheck("Удалять надписи в углах (автоопределение)", func(b bool) {})
+	wmCheck = widget.NewCheck("Удалять надписи (автоопределение по краям фото)", func(b bool) {})
 
 	wmMethodSel = widget.NewRadioGroup([]string{
 		"Размазывание соседних пикселей",
@@ -361,11 +361,11 @@ func main() {
 		wmSensLabel.SetText(fmt.Sprintf("Чувствительность: %.1f (меньше = чаще срабатывает)", v))
 	}
 
-	wmSizeLabel = widget.NewLabel("Размер зоны в углу: 15% от фото")
+	wmSizeLabel = widget.NewLabel("Размер полосы (верх/низ/бока): 15% от фото")
 	wmSizeSlider = widget.NewSlider(5, 35)
 	wmSizeSlider.SetValue(15)
 	wmSizeSlider.OnChanged = func(v float64) {
-		wmSizeLabel.SetText(fmt.Sprintf("Размер зоны в углу: %.0f%% от фото", v))
+		wmSizeLabel.SetText(fmt.Sprintf("Размер полосы (верх/низ/бока): %.0f%% от фото", v))
 	}
 
 	wmPreviewImg = canvas.NewImageFromImage(nil)
@@ -438,3 +438,4 @@ func main() {
 
 	window.ShowAndRun()
 }
+
