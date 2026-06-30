@@ -353,10 +353,10 @@ func main() {
 	}, func(s string) {})
 	wmMethodSel.SetSelected("Размазывание соседних пикселей")
 
-	wmSensLabel = widget.NewLabel("Чувствительность: 1.8 (меньше = чаще срабатывает)")
-	wmSensSlider = widget.NewSlider(1.1, 4.0)
+	wmSensLabel = widget.NewLabel("Чувствительность: 1.3 (меньше = чаще срабатывает)")
+	wmSensSlider = widget.NewSlider(1.0, 3.0)
 	wmSensSlider.Step = 0.1
-	wmSensSlider.SetValue(1.8)
+	wmSensSlider.SetValue(1.3)
 	wmSensSlider.OnChanged = func(v float64) {
 		wmSensLabel.SetText(fmt.Sprintf("Чувствительность: %.1f (меньше = чаще срабатывает)", v))
 	}
@@ -438,4 +438,3 @@ func main() {
 
 	window.ShowAndRun()
 }
-
