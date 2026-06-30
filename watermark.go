@@ -22,7 +22,6 @@ func edgeDensity(img image.Image, rect image.Rectangle) float64 {
 	var sum float64
 	var count int
 	step := 1
-	// для крупных изображений можно прыгать через пиксель для скорости
 	if r.Dx()*r.Dy() > 200000 {
 		step = 2
 	}
@@ -43,15 +42,47 @@ func edgeDensity(img image.Image, rect image.Rectangle) float64 {
 	return sum / float64(count)
 }
 
+// maxBlockDensity разбивает rect на блоки blockSize x blockSize и возвращает максимальную
+// среднюю резкость среди блоков. Это гораздо чувствительнее к маленькому локальному тексту
+// на спокойном фоне, чем средняя резкость по всей area (которая "размывает" текст в среднем).
+func maxBlockDensity(img image.Image, rect image.Rectangle, blockSize int) float64 {
+	bounds := img.Bounds()
+	r := rect.Intersect(bounds)
+	if r.Dx() < blockSize || r.Dy() < blockSize {
+		// область меньше блока - просто считаем целиком
+		return edgeDensity(img, r)
+	}
+
+	maxD := 0.0
+	for by := r.Min.Y; by < r.Max.Y; by += blockSize {
+		for bx := r.Min.X; bx < r.Max.X; bx += blockSize {
+			blockRect := image.Rect(bx, by, minInt(bx+blockSize, r.Max.X), minInt(by+blockSize, r.Max.Y))
+			d := edgeDensity(img, blockRect)
+			if d > maxD {
+				maxD = d
+			}
+		}
+	}
+	return maxD
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 type cornerInfo struct {
 	name string
 	rect image.Rectangle
 	flag bool
 }
 
-// detectCorners возвращает 4 полосы (верх/низ/лево/право, на всю ширину/высоту) с пометкой,
-// похоже ли там на надпись. Полосы используются вместо квадратов в углах, потому что надписи
-// часто растянуты по всей ширине снизу/сверху, а не сидят строго в углу.
+// detectCorners проверяет 4 полосы (верх/низ/лево/право). Внутри каждой полосы ищется
+// самый "контрастный" блок (maxBlockDensity) - так маленький текст на спокойном фоне не
+// "размывается" в среднем. Порог сравнивается с фоном ВНЕ этой полосы (центр фото), что
+// надёжнее, чем сравнение со средним по всему кадру.
 func detectCorners(img image.Image, sizeFrac float64, sensitivity float64) []cornerInfo {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
@@ -71,13 +102,23 @@ func detectCorners(img image.Image, sizeFrac float64, sensitivity float64) []cor
 		{"справа", image.Rect(bounds.Max.X-stripW, bounds.Min.Y, bounds.Max.X, bounds.Max.Y), false},
 	}
 
-	globalAvg := edgeDensity(img, bounds)
-	threshold := globalAvg * sensitivity
-	minFloor := 6.0
+	// фон для сравнения - центральная область фото (без полос), чтобы не зависеть от
+	// общей "шумности" всего кадра, а сравнивать именно с тем, что считается "чистым" фоном
+	centerRect := image.Rect(
+		bounds.Min.X+stripW, bounds.Min.Y+stripH,
+		bounds.Max.X-stripW, bounds.Max.Y-stripH,
+	)
+	if centerRect.Dx() < 10 || centerRect.Dy() < 10 {
+		centerRect = bounds
+	}
+	blockSize := 24
+	backgroundLevel := edgeDensity(img, centerRect)
+
+	threshold := backgroundLevel*sensitivity + 2.0 // +2.0 страхует от деления на почти ноль на гладком фоне
 
 	for i := range corners {
-		d := edgeDensity(img, corners[i].rect)
-		if d > threshold && d > minFloor {
+		d := maxBlockDensity(img, corners[i].rect, blockSize)
+		if d > threshold {
 			corners[i].flag = true
 		}
 	}
