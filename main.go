@@ -35,7 +35,7 @@ var (
 	statusLabel   *widget.Label
 	fileListLabel *widget.Label
 
-	wmCheck        *widget.Check
+	wmModeSel      *widget.RadioGroup
 	wmMethodSel    *widget.RadioGroup
 	wmHeightSlider *widget.Slider
 	wmHeightLabel  *widget.Label
@@ -43,6 +43,9 @@ var (
 	wmLeftLabel    *widget.Label
 	wmRightSlider  *widget.Slider
 	wmRightLabel   *widget.Label
+	wmBlurSlider   *widget.Slider
+	wmBlurLabel    *widget.Label
+	wmMethodBox    *fyne.Container
 	wmPreviewImg   *canvas.Image
 	wmPreviewInfo  *widget.Label
 
@@ -134,6 +137,17 @@ func getCropMode() string {
 	}
 }
 
+func getWmMode() string {
+	switch wmModeSel.Selected {
+	case "Удалить надпись (размытие/размазывание зоны)":
+		return "remove"
+	case "Обрезать часть фото с надписью":
+		return "crop"
+	default:
+		return "none"
+	}
+}
+
 func getWmMethod() string {
 	if wmMethodSel.Selected == "Размытие" {
 		return "blur"
@@ -172,12 +186,25 @@ func doWatermarkPreview() {
 
 		resized := preWatermarkImage(src, targetW, targetH, cropMode)
 
-		zone := fixedZoneRect(resized.Bounds(), wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
-		overlay := drawZoneOutline(resized, zone)
+		mode := getWmMode()
+		var overlay image.Image
+
+		switch mode {
+		case "remove":
+			zone := fixedZoneRect(resized.Bounds(), wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
+			overlay = removeFixedZone(resized, zone, getWmMethod(), int(wmBlurSlider.Value))
+			wmPreviewInfo.SetText("Так будет выглядеть результат очистки. Подбирай слайдеры, пока не устроит качество.")
+		case "crop":
+			overlay = cropZoneOut(resized, wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
+			wmPreviewInfo.SetText("Так будет выглядеть фото после обрезки нижней части. Итоговый размер подгонится под целевое разрешение отдельно.")
+		default:
+			zone := fixedZoneRect(resized.Bounds(), wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
+			overlay = drawZoneOutline(resized, zone)
+			wmPreviewInfo.SetText("Красная рамка показывает зону с надписью (для справки). Выбери режим выше, чтобы что-то с ней сделать.")
+		}
 
 		wmPreviewImg.Image = overlay
 		wmPreviewImg.Refresh()
-		wmPreviewInfo.SetText("Красная рамка — зона, которая будет очищена у всех фото в пачке. Подвинь слайдеры, чтобы рамка точно легла на надпись.")
 	}()
 }
 
@@ -227,11 +254,17 @@ func processFiles() {
 				return false
 			}
 
-			pre := preWatermarkImage(src, targetW, targetH, cropMode)
+			wmMode := getWmMode()
+			workSrc := src
+			if wmMode == "crop" {
+				workSrc = cropZoneOut(src, wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
+			}
 
-			if wmCheck.Checked {
+			pre := preWatermarkImage(workSrc, targetW, targetH, cropMode)
+
+			if wmMode == "remove" {
 				zone := fixedZoneRect(pre.Bounds(), wmHeightSlider.Value, wmLeftSlider.Value, wmRightSlider.Value)
-				pre = removeFixedZone(pre, zone, getWmMethod())
+				pre = removeFixedZone(pre, zone, getWmMethod(), int(wmBlurSlider.Value))
 			}
 
 			result := finalizeImage(pre, targetW, targetH, cropMode)
@@ -332,13 +365,37 @@ func main() {
 	prefixEntry.SetPlaceHolder("Префикс имени (например: bg)")
 	prefixEntry.SetText("image")
 
-	wmCheck = widget.NewCheck("Удалять надпись (фиксированная зона снизу)", func(b bool) {})
+	wmModeSel = widget.NewRadioGroup([]string{
+		"Ничего не делать с надписью",
+		"Удалить надпись (размытие/размазывание зоны)",
+		"Обрезать часть фото с надписью",
+	}, func(s string) {
+		if wmMethodBox != nil {
+			if s == "Удалить надпись (размытие/размазывание зоны)" {
+				wmMethodBox.Show()
+			} else {
+				wmMethodBox.Hide()
+			}
+		}
+		doWatermarkPreview()
+	})
+	wmModeSel.SetSelected("Ничего не делать с надписью")
 
 	wmMethodSel = widget.NewRadioGroup([]string{
-		"Размазывание соседних пикселей",
 		"Размытие",
-	}, func(s string) {})
-	wmMethodSel.SetSelected("Размазывание соседних пикселей")
+		"Размазывание соседних пикселей",
+	}, func(s string) {
+		doWatermarkPreview()
+	})
+	wmMethodSel.SetSelected("Размытие")
+
+	wmBlurLabel = widget.NewLabel("Сила размытия: 14")
+	wmBlurSlider = widget.NewSlider(4, 30)
+	wmBlurSlider.SetValue(14)
+	wmBlurSlider.OnChanged = func(v float64) {
+		wmBlurLabel.SetText(fmt.Sprintf("Сила размытия: %.0f", v))
+		doWatermarkPreview()
+	}
 
 	wmHeightLabel = widget.NewLabel("Высота зоны снизу: 10% от фото")
 	wmHeightSlider = widget.NewSlider(2, 40)
@@ -370,13 +427,20 @@ func main() {
 	wmPreviewInfo = widget.NewLabel("Нажми «Проверить на первом фото», чтобы увидеть, что найдёт программа.")
 	wmPreviewInfo.Wrapping = fyne.TextWrapWord
 
+	wmMethodBox = container.NewVBox(
+		wmMethodSel,
+		wmBlurLabel,
+		wmBlurSlider,
+	)
+	wmMethodBox.Hide()
+
 	wmPreviewBtn := widget.NewButton("Обновить превью", func() {
 		doWatermarkPreview()
 	})
 
 	wmBox := container.NewVBox(
-		wmCheck,
-		wmMethodSel,
+		wmModeSel,
+		wmMethodBox,
 		wmHeightLabel,
 		wmHeightSlider,
 		wmLeftLabel,
