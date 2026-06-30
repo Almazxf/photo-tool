@@ -180,4 +180,3 @@ func processImage(src image.Image, targetW, targetH int, mode string) image.Imag
 	pre := preWatermarkImage(src, targetW, targetH, mode)
 	return finalizeImage(pre, targetW, targetH, mode)
 }
-
