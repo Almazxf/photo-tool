@@ -125,24 +125,25 @@ func detectCorners(img image.Image, sizeFrac float64, sensitivity float64) []cor
 	return corners
 }
 
-// mirrorFillRect заполняет область rect, отражая соседние пиксели снаружи rect (по короткой стороне к центру изображения)
-func mirrorFillRect(img *image.RGBA, rect image.Rectangle, fullBounds image.Rectangle) {
-	cx := (fullBounds.Min.X + fullBounds.Max.X) / 2
-	cy := (fullBounds.Min.Y + fullBounds.Max.Y) / 2
-
+// mirrorFillRect заполняет полосу (rect), отражая зеркально соседний "чистый" фон,
+// примыкающий к внутренней границе этой полосы. direction указывает, с какой стороны
+// фото расположена полоса ("верх", "низ", "слева", "справа") - это определяет, какая
+// граница считается "внутренней" (откуда берём отражение).
+func mirrorFillRect(img *image.RGBA, rect image.Rectangle, fullBounds image.Rectangle, direction string) {
 	for y := rect.Min.Y; y < rect.Max.Y; y++ {
 		for x := rect.Min.X; x < rect.Max.X; x++ {
-			// отражаем точку относительно границы прямоугольника в сторону центра изображения
-			var sx, sy int
-			if x < cx {
-				sx = rect.Max.X + (rect.Max.X - x) // отражение вправо от правого края прямоугольника
-			} else {
-				sx = rect.Min.X - (x - rect.Min.X) // отражение влево от левого края
-			}
-			if y < cy {
-				sy = rect.Max.Y + (rect.Max.Y - y)
-			} else {
-				sy = rect.Min.Y - (y - rect.Min.Y)
+			sx, sy := x, y
+			switch direction {
+			case "низ":
+				// внутренняя граница - верхний край полосы (rect.Min.Y)
+				sy = 2*rect.Min.Y - y - 1
+			case "верх":
+				// внутренняя граница - нижний край полосы (rect.Max.Y)
+				sy = 2*rect.Max.Y - y - 1
+			case "слева":
+				sx = 2*rect.Max.X - x - 1
+			case "справа":
+				sx = 2*rect.Min.X - x - 1
 			}
 			sx = clampInt(sx, fullBounds.Min.X, fullBounds.Max.X-1)
 			sy = clampInt(sy, fullBounds.Min.Y, fullBounds.Max.Y-1)
@@ -217,7 +218,7 @@ func removeWatermarks(src image.Image, cornerFrac, sensitivity float64, method s
 		if method == "blur" {
 			blurRect(rgba, c.rect, 6)
 		} else {
-			mirrorFillRect(rgba, c.rect, bounds)
+			mirrorFillRect(rgba, c.rect, bounds, c.name)
 		}
 	}
 	return rgba, corners
