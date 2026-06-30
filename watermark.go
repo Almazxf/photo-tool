@@ -162,15 +162,24 @@ func clampInt(v, min, max int) int {
 	return v
 }
 
-// blurRect делает простое блочное размытие (box blur) внутри rect
-func blurRect(img *image.RGBA, rect image.Rectangle, radius int) {
+// blurRect делает блочное размытие (box blur) внутри rect, но сэмплирует пиксели из СНИМКА,
+// расширенного на radius за пределы rect (внутри границ всего изображения). Благодаря этому
+// на верхней/боковой границе зоны размытие "захватывает" немного чистого фона снаружи —
+// переход получается плавным, без резкого шва на границе зоны.
+func blurRect(img *image.RGBA, rect image.Rectangle, fullBounds image.Rectangle, radius int) {
 	if radius < 1 {
 		radius = 1
 	}
-	src := image.NewRGBA(rect)
-	for y := rect.Min.Y; y < rect.Max.Y; y++ {
-		for x := rect.Min.X; x < rect.Max.X; x++ {
-			src.Set(x, y, img.At(x, y))
+
+	snapRect := image.Rect(
+		rect.Min.X-radius, rect.Min.Y-radius,
+		rect.Max.X+radius, rect.Max.Y+radius,
+	).Intersect(fullBounds)
+
+	snap := image.NewRGBA(snapRect)
+	for y := snapRect.Min.Y; y < snapRect.Max.Y; y++ {
+		for x := snapRect.Min.X; x < snapRect.Max.X; x++ {
+			snap.Set(x, y, img.At(x, y))
 		}
 	}
 
@@ -180,10 +189,10 @@ func blurRect(img *image.RGBA, rect image.Rectangle, radius int) {
 			for dy := -radius; dy <= radius; dy++ {
 				for dx := -radius; dx <= radius; dx++ {
 					sx, sy := x+dx, y+dy
-					if sx < rect.Min.X || sx >= rect.Max.X || sy < rect.Min.Y || sy >= rect.Max.Y {
+					if sx < snapRect.Min.X || sx >= snapRect.Max.X || sy < snapRect.Min.Y || sy >= snapRect.Max.Y {
 						continue
 					}
-					r, g, b, a := src.At(sx, sy).RGBA()
+					r, g, b, a := snap.At(sx, sy).RGBA()
 					rs += int(r >> 8)
 					gs += int(g >> 8)
 					bs += int(b >> 8)
@@ -215,8 +224,34 @@ func fixedZoneRect(bounds image.Rectangle, heightPct, leftPct, rightPct float64)
 	)
 }
 
+// cropZoneOut физически вырезает зону (например, полосу снизу с надписью) из фото, возвращая
+// уменьшенное изображение БЕЗ этой части (а не закрашивает её, как removeFixedZone).
+func cropZoneOut(src image.Image, heightPct, leftPct, rightPct float64) image.Image {
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	cutH := int(float64(h) * heightPct / 100.0)
+	leftCut := int(float64(w) * leftPct / 100.0)
+	rightCut := int(float64(w) * rightPct / 100.0)
+
+	newRect := image.Rect(
+		bounds.Min.X+leftCut, bounds.Min.Y,
+		bounds.Max.X-rightCut, bounds.Max.Y-cutH,
+	)
+	if newRect.Dx() < 1 || newRect.Dy() < 1 {
+		return src // на всякий случай - если настройки совсем абсурдные, ничего не обрезаем
+	}
+
+	out := image.NewRGBA(image.Rect(0, 0, newRect.Dx(), newRect.Dy()))
+	for y := newRect.Min.Y; y < newRect.Max.Y; y++ {
+		for x := newRect.Min.X; x < newRect.Max.X; x++ {
+			out.Set(x-newRect.Min.X, y-newRect.Min.Y, src.At(x, y))
+		}
+	}
+	return out
+}
+
 // removeFixedZone применяет выбранный метод удаления к ОДНОЙ заданной вручную зоне (без автоопределения).
-func removeFixedZone(src image.Image, zone image.Rectangle, method string) *image.RGBA {
+func removeFixedZone(src image.Image, zone image.Rectangle, method string, blurStrength int) *image.RGBA {
 	bounds := src.Bounds()
 	rgba := image.NewRGBA(bounds)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
@@ -229,7 +264,7 @@ func removeFixedZone(src image.Image, zone image.Rectangle, method string) *imag
 		return rgba
 	}
 	if method == "blur" {
-		blurRect(rgba, zone, 6)
+		blurRect(rgba, zone, bounds, blurStrength)
 	} else {
 		mirrorFillRect(rgba, zone, bounds, "низ")
 	}
@@ -266,7 +301,7 @@ func removeWatermarks(src image.Image, cornerFrac, sensitivity float64, method s
 			continue
 		}
 		if method == "blur" {
-			blurRect(rgba, c.rect, 6)
+			blurRect(rgba, c.rect, bounds, 6)
 		} else {
 			mirrorFillRect(rgba, c.rect, bounds, c.name)
 		}
