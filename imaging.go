@@ -175,6 +175,19 @@ func finalizeImage(pre image.Image, targetW, targetH int, mode string) image.Ima
 	return pre
 }
 
+// mirrorImage отражает изображение по горизонтали (зеркало слева-направо).
+func mirrorImage(src image.Image) *image.RGBA {
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dst.Set(x, y, src.At(bounds.Min.X+w-1-x, bounds.Min.Y+y))
+		}
+	}
+	return dst
+}
+
 // processImage применяет полный пайплайн: обрезка/letterbox/растяжение -> ресайз (без учёта надписей)
 func processImage(src image.Image, targetW, targetH int, mode string) image.Image {
 	pre := preWatermarkImage(src, targetW, targetH, mode)
