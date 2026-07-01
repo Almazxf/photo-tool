@@ -31,6 +31,7 @@ var (
 	qualityLabel  *widget.Label
 	renameCheck   *widget.Check
 	prefixEntry   *widget.Entry
+	mirrorCheck   *widget.Check
 	progressBar   *widget.ProgressBar
 	statusLabel   *widget.Label
 	fileListLabel *widget.Label
@@ -269,6 +270,10 @@ func processFiles() {
 
 			result := finalizeImage(pre, targetW, targetH, cropMode)
 
+			if mirrorCheck.Checked {
+				result = mirrorImage(result)
+			}
+
 			ext := ".jpg"
 			if !useJPG {
 				ext = ".png"
@@ -452,7 +457,7 @@ func main() {
 		wmPreviewInfo,
 	)
 
-	progressBar = widget.NewProgressBar()
+	mirrorCheck = widget.NewCheck("Отзеркалить фото горизонтально", func(b bool) {})
 	statusLabel = widget.NewLabel("Готов к работе")
 
 	startBtn := widget.NewButton("Начать обработку", func() {
@@ -479,6 +484,8 @@ func main() {
 		widget.NewSeparator(),
 		renameCheck,
 		prefixEntry,
+		widget.NewSeparator(),
+		mirrorCheck,
 		widget.NewSeparator(),
 		widget.NewLabel("Удаление надписей в углах:"),
 		wmBox,
