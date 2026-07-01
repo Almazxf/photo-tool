@@ -458,6 +458,7 @@ func main() {
 	)
 
 	mirrorCheck = widget.NewCheck("Отзеркалить фото горизонтально", func(b bool) {})
+	progressBar = widget.NewProgressBar()
 	statusLabel = widget.NewLabel("Готов к работе")
 
 	startBtn := widget.NewButton("Начать обработку", func() {
